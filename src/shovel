@@ -1,0 +1,27 @@
+#!/usr/bin/env python3
+
+from enum import Enum
+
+import typer
+
+import config
+import log
+
+main = typer.Typer(add_completion=False)
+
+class UserMode(str, Enum):
+    CURRENT = 'current',
+    ROOT = 'root',
+    SHOVEL = 'shovel'
+
+
+@main.command()
+def default_run(user_mode: UserMode = typer.Option('current', "--user", "-u",
+                help='change user mode')):
+    prgm_config = config.Config()
+    prgm_config.parse()
+
+    log.msg("nothing to do, exiting...")
+
+if __name__ == '__main__':
+    main()
