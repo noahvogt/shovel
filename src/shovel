@@ -18,8 +18,8 @@ class UserMode(str, Enum):
 @main.command()
 def default_run(user_mode: UserMode = typer.Option('current', "--user", "-u",
                 help='change user mode')):
-    prgm_config = config.Config()
-    prgm_config.parse()
+    config_parser = config.ConfigParser()
+    config_parser.parse()
 
     log.msg("nothing to do, exiting...")
 
