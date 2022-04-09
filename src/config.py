@@ -49,43 +49,98 @@ def get_rules(rule_dir):
 
     return rules
 
-def strip_comments(file):
-    raw_lines, stripped_lines = [], []
+def read_config_file(file):
+    raw_lines = []
     try:
         with open(file, encoding="utf8", mode="r") as reader:
             raw_lines = reader.readlines()
         reader.close()
 
-        for line in raw_lines:
-            if not (re.match("^\\s*#", line) or re.match("^\\s.*$", line)):
-                stripped_lines.append(line.strip())
     except FileNotFoundError:
         log.error_exit("config file not found")
     except PermissionError:
         log.error_exit("config not accessible, please check your permissions")
 
-    return stripped_lines
+    return raw_lines
+
+class Validator: #pylint: disable=R0903
+    def validate(self, value):
+        raise NotImplementedError("please define this function in the child")
+
+class SSHKeyValidator(Validator): #pylint: disable=R0903
+    def validate(self, value: str) -> bool:
+        try:
+            print(value)
+            with open(value, encoding="utf8", mode="r") as reader:
+                reader.readlines()
+            reader.close()
+
+        except FileNotFoundError:
+            log.error_exit("ssh key file not found")
+            return False
+        except PermissionError:
+            log.error_exit("ssh key not accessible, please check your permissions")
+            return False
+
+        return True
+
+class IntervalValidator(Validator): #pylint: disable=R0903
+    def validate(self, value: str) -> bool:
+        try:
+            if int(value) is int:
+                return True
+        except (ValueError, KeyError):
+            log.error_exit("please provide the inverval as an integer")
+        return False
 
 
-class ConfigEntry:
-    def __init__(self, value: str, is_obligatory: bool, config_str: str):
-        self.is_obligatory = is_obligatory
-        self.value = value
-        self.config_str = config_str
+class GithubUserValidator(Validator): #pylint: disable=R0903
+    def validate(self, value: str) -> bool:
+        return bool(re.match("[a-zA-Z0-9]+[a-zA-Z0-9\\-]*[a-zA-Z0-9]+", value))
 
 
-class ConfigState:
-    def __init__(self):
-        self.ssh_key_location = ConfigEntry("", True, "ssh-key")
-        self.interval = ConfigEntry("", True, "interval")
-        self.github_user = ConfigEntry("", True, "github")
-        self.aur_user = ConfigEntry("", True, "aur")
+# assumes same rules as github
+class AURUserValidator(Validator): #pylint: disable=R0903
+    def validate(self, value: str):
+        return bool(re.match("[a-zA-Z0-9]+[a-zA-Z0-9\\-]*[a-zA-Z0-9]+", value))
 
+
+class PidFileValidator(Validator): #pylint: disable=R0903
+    def validate(self, value: str) -> bool:
+        if value not in ["yes", "no"]:
+            log.error_exit("invalid option, use 'yes' or 'no'", do_exit=False)
+            return False
+        return True
+
+
+def validate_config_entry(validator, value):
+    validator.validate("hey", value)
+
+
+def config_entry(value: str, is_obligatory: bool, config_str: str,
+                 validator):
+    return {"value" : value, "is_obligatory": is_obligatory, "validator" :
+            validator, "config_str" : config_str}
+
+
+def get_empty_config_state():
+    return {"ssh_key_location" : config_entry("", True, "ssh-key",
+                                 SSHKeyValidator),
+            "interval" : config_entry("", True, "interval", IntervalValidator),
+            "github_user" : config_entry("", True, "github",
+                            GithubUserValidator),
+            "aur_user" : config_entry("", True, "aur", AURUserValidator),
+            "use_pid_file" : config_entry("no", False, "use-pid-file",
+                             PidFileValidator)}
+
+def is_empty_or_comment_line(line: str):
+    return (re.match("^\\s*#", line) or re.match("^\\s*$", line))
 
 class ConfigParser:
     def __init__(self):
         self.config_dirs = get_configured_dirs()
         self.rules = get_rules(self.config_dirs.get("rule_dir"))
+        self.config_state = get_empty_config_state()
         log.msg("configuration initialized", "success")
 
 
@@ -96,15 +151,51 @@ class ConfigParser:
 
 
     def get_config_file(self):
-        return strip_comments(str(self.config_dirs.get("config_dir")) +
-                              "/config")
+        return read_config_file(str(self.config_dirs.get("config_dir")) +
+                                "/config")
+
+    #def get_option_from_config_str(self, config_str: str):
+
 
     def parse_config_file(self):
+        log.msg("parsing config file")
         file_content = self.get_config_file()
-        print(file_content)
+        for index, line in enumerate(file_content):
+
+            if is_empty_or_comment_line(line):
+                continue
+
+            if line.endswith("\n"):
+                line = line[:-1]
+
+            if not re.match("^\\s*[a-z\\-]+\\s*=\\s*\\S*\\s*$", line):
+                log.error_exit("wrong config format on line {}: {}".format(
+                               index + 1, line))
+
+            config_str = str(line[:line.find("=")]).strip()
+            value = str(line[line.find("=") + 1:]).strip()
+            full_config_name = ""
+
+            for item in self.config_state.items():
+                if config_str == item[1]["config_str"]:
+                    full_config_name = item[0]
+                    break
+            else:
+                log.error_exit("'{}' on line {} is not a valid option".format(
+                               config_str, index))
+
+            validate_config_entry((self.config_state.get(full_config_name).get("validator")), value)
+            #validate_config_entry(SSHKeyValidato#r, value)
+            #if self.config_state.get(full_config_name).get("options") is not None:
+            #    print("checking options for " + config_str + line)
+
+
+            print(config_str)
+            print(value)
+            print(full_config_name)
 
 
     def parse(self):
-        #parse_config()
+        log.msg("parsing configuration")
         check_for_write_permissions(self.config_dirs)
         self.parse_config_file()
