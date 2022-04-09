@@ -1,9 +1,10 @@
 import os
 import re
+from abc import ABC, abstractmethod
 
 import log
 
-def get_xdg_dir(env_var: str, fallback_dir: str, home: str):
+def get_xdg_dir(env_var: str, fallback_dir: str, home):
     xdg_dir = os.getenv(env_var)
     if xdg_dir is None or xdg_dir == "":
         xdg_dir = "{}/{}".format(home, fallback_dir)
@@ -63,23 +64,24 @@ def read_config_file(file):
 
     return raw_lines
 
-class Validator: #pylint: disable=R0903
-    def validate(self, value):
-        raise NotImplementedError("please define this function in the child")
+class Validator(ABC): #pylint: disable=R0903
+    @abstractmethod
+    def validate(self, value) -> bool:
+        pass
 
 class SSHKeyValidator(Validator): #pylint: disable=R0903
     def validate(self, value: str) -> bool:
         try:
-            print(value)
             with open(value, encoding="utf8", mode="r") as reader:
                 reader.readlines()
             reader.close()
 
         except FileNotFoundError:
-            log.error_exit("ssh key file not found")
+            log.error_exit("ssh key file not found", do_exit=False)
             return False
         except PermissionError:
-            log.error_exit("ssh key not accessible, please check your permissions")
+            log.error_exit("ssh key not accessible, please check your"
+                           " permissions", do_exit=False)
             return False
 
         return True
@@ -90,7 +92,8 @@ class IntervalValidator(Validator): #pylint: disable=R0903
             if int(value) is int:
                 return True
         except (ValueError, KeyError):
-            log.error_exit("please provide the inverval as an integer")
+            log.error_exit("please provide the inverval as an integer",
+                           do_exit=False)
         return False
 
 
@@ -101,7 +104,7 @@ class GithubUserValidator(Validator): #pylint: disable=R0903
 
 # assumes same rules as github
 class AURUserValidator(Validator): #pylint: disable=R0903
-    def validate(self, value: str):
+    def validate(self, value: str) -> bool:
         return bool(re.match("[a-zA-Z0-9]+[a-zA-Z0-9\\-]*[a-zA-Z0-9]+", value))
 
 
@@ -113,8 +116,8 @@ class PidFileValidator(Validator): #pylint: disable=R0903
         return True
 
 
-def validate_config_entry(validator, value):
-    validator.validate("hey", value)
+def is_valid_config_entry(validator, value) -> bool:
+    return validator.validate("hey", value)
 
 
 def config_entry(value: str, is_obligatory: bool, config_str: str,
@@ -123,7 +126,7 @@ def config_entry(value: str, is_obligatory: bool, config_str: str,
             validator, "config_str" : config_str}
 
 
-def get_empty_config_state():
+def get_empty_config_state() -> dict:
     return {"ssh_key_location" : config_entry("", True, "ssh-key",
                                  SSHKeyValidator),
             "interval" : config_entry("", True, "interval", IntervalValidator),
@@ -140,7 +143,7 @@ class ConfigParser:
     def __init__(self):
         self.config_dirs = get_configured_dirs()
         self.rules = get_rules(self.config_dirs.get("rule_dir"))
-        self.config_state = get_empty_config_state()
+        self.config_state: dict = get_empty_config_state()
         log.msg("configuration initialized", "success")
 
 
@@ -184,15 +187,21 @@ class ConfigParser:
                 log.error_exit("'{}' on line {} is not a valid option".format(
                                config_str, index))
 
-            validate_config_entry((self.config_state.get(full_config_name).get("validator")), value)
+            if not is_valid_config_entry((self.config_state.get(
+                   full_config_name).get("validator")), value):
+                log.error_exit("configuration entry for '{}' is invalid.".
+                               format(config_str))
+
+
+            self.config_state.get(full_config_name)["value"] = value
             #validate_config_entry(SSHKeyValidato#r, value)
             #if self.config_state.get(full_config_name).get("options") is not None:
             #    print("checking options for " + config_str + line)
 
 
-            print(config_str)
-            print(value)
-            print(full_config_name)
+            #print(config_str)
+            #print(value)
+            #print(full_config_name)
 
 
     def parse(self):
