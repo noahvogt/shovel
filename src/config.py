@@ -1,4 +1,5 @@
 import os
+import sys
 import re
 from abc import ABC, abstractmethod
 
@@ -88,24 +89,36 @@ class SSHKeyValidator(Validator): #pylint: disable=R0903
 
 class IntervalValidator(Validator): #pylint: disable=R0903
     def validate(self, value: str) -> bool:
-        try:
-            if int(value) is int:
-                return True
-        except (ValueError, KeyError):
-            log.error_exit("please provide the inverval as an integer",
-                           do_exit=False)
+        if re.match("^[0-9]+$", value):
+            return True
+        log.error_exit("please provide the inverval as an integer",
+                       do_exit=False)
         return False
 
 
 class GithubUserValidator(Validator): #pylint: disable=R0903
     def validate(self, value: str) -> bool:
-        return bool(re.match("[a-zA-Z0-9]+[a-zA-Z0-9\\-]*[a-zA-Z0-9]+", value))
+        is_valid: bool = bool(re.match(
+            "^[a-zA-Z0-9]+[a-zA-Z0-9\\-]*[a-zA-Z0-9]+$", value))
+        if not is_valid:
+            log.error_exit("Github Usernames may only contain alphanumeric " +
+                           "characters or single hyphens, and cannot begin " +
+                           "or end with a hyphen.", do_exit=False)
+            return False
+        return True
 
 
 # assumes same rules as github
 class AURUserValidator(Validator): #pylint: disable=R0903
     def validate(self, value: str) -> bool:
-        return bool(re.match("[a-zA-Z0-9]+[a-zA-Z0-9\\-]*[a-zA-Z0-9]+", value))
+        is_valid: bool = bool(re.match(
+            "^[a-zA-Z0-9]+[a-zA-Z0-9\\-]*[a-zA-Z0-9]+$", value))
+        if not is_valid:
+            log.error_exit("AUR Usernames may only contain alphanumeric " +
+                           "characters or single hyphens, and cannot begin " +
+                           "or end with a hyphen.", do_exit=False)
+            return False
+        return True
 
 
 class PidFileValidator(Validator): #pylint: disable=R0903
@@ -127,7 +140,7 @@ def config_entry(value: str, is_obligatory: bool, config_str: str,
 
 
 def get_empty_config_state() -> dict:
-    return {"ssh_key_location" : config_entry("", True, "ssh-key",
+    return {"ssh_key_location" : config_entry("", True, "sshkey",
                                  SSHKeyValidator),
             "interval" : config_entry("", True, "interval", IntervalValidator),
             "github_user" : config_entry("", True, "github",
@@ -157,7 +170,20 @@ class ConfigParser:
         return read_config_file(str(self.config_dirs.get("config_dir")) +
                                 "/config")
 
-    #def get_option_from_config_str(self, config_str: str):
+
+    def check_for_unset_obligatory_options(self):
+        can_assume_all_obligatory_options_set: bool = True
+
+        for key in self.config_state:
+            if ((self.config_state.get(key)["is_obligatory"] == True) and
+               self.config_state.get(key)["value"] == ""):
+               log.error_exit("obligatory option '{}' not set".format(
+                              self.config_state.get(key)["config_str"]),
+                              do_exit=False)
+               can_assume_all_obligatory_options_set = False
+
+        if not can_assume_all_obligatory_options_set:
+            sys.exit(1)
 
 
     def parse_config_file(self):
@@ -194,17 +220,11 @@ class ConfigParser:
 
 
             self.config_state.get(full_config_name)["value"] = value
-            #validate_config_entry(SSHKeyValidato#r, value)
-            #if self.config_state.get(full_config_name).get("options") is not None:
-            #    print("checking options for " + config_str + line)
 
-
-            #print(config_str)
-            #print(value)
-            #print(full_config_name)
-
+        self.check_for_unset_obligatory_options()
 
     def parse(self):
         log.msg("parsing configuration")
         check_for_write_permissions(self.config_dirs)
         self.parse_config_file()
+        log.msg("configuration parsed successfully", "success")
